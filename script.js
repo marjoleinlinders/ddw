@@ -1,9 +1,10 @@
-var mic, fft, first, prevMillis, iterator, waveformLength, analyzer, count,
+var mic, fft, first, iterator, waveformLength, analyzer, loaded,
     vh = 1024,
-    vw = 1920,
-    measurePoints = 1024, //1024 is the max!
-    measureFreq = 1, //ms
-    analyzeFreq = 1; //every n measures
+    measurePoints = 1024; //1024 is the max!
+var songs = [
+    "Electric Tribe - unreleased demo 'Running Electric/Euh' (2018)",
+    "Electric Tribe - unreleased demo 'So long' (2018)",
+    "Electric Tribe - 'Met de Sterren Meebewegen'"];
 
 var avg = function (arr) {
     var sum = 0;
@@ -35,7 +36,6 @@ var Analyzer = function () {
         var avgVal = avg(arr);
         return {
             max: Math.max.apply(null, arr),
-            min: Math.min.apply(null, arr),
             avg: avgVal,
             osc: osc(arr, avgVal)
         };
@@ -47,24 +47,55 @@ var Analyzer = function () {
         }
         return y;
     };
+
 };
 
-//var song;
-//function preload() {
-//    song = loadSound("test.mp3");
-//}
+var song;
+var songIndex = 0;
+var currentSong = songs[0];
+function loadSong(onstart, onend) {
+    song = loadSound("/assets/test" + songIndex + ".mp3", function() {
+        song.play();
+        song.onended(function(event){
+            songIndex ++;
+            if (songIndex > 2) songIndex = 0;
+            onend(songs[songIndex]);
+            setTimeout(function() {
+                loadSong(onstart, onend)
+            }, 2000)
+        });
+        fft.setInput(song);
+        onstart();
 
-window.setupAudio = function () {
+        song.rate(20);
+    });
+}
+
+window.setupAudio = function (type) {
     analyzer = new Analyzer();
-    //song.loop();
-     mic = new p5.AudioIn();
-     mic.start();
     fft = new p5.FFT();
-    //fft.setInput(song);
-    fft.setInput(mic);
+    if (type === "mp3") {
+        loadSong(function() {
+            loaded = true;
+            songReturned = false;
+        }, function (song) {
+            currentSong = song;
+            loaded = false;
+        })
+    } else {
+        mic = new p5.AudioIn();
+        mic.start();
+        fft.setInput(mic);
+        loaded = true;
+    }
 };
 
+var songReturned = false;
 window.drawAudio = function () {
+    if (loaded !== true && songReturned !== true) {
+        songReturned = true;
+        return {song: currentSong};
+    }
     var waveform = fft.waveform();
 
     if (!first) {
@@ -82,179 +113,320 @@ window.drawAudio = function () {
 };
 
 
-
-var lineCount = 0;
-var lineCountMax;
-var reverse = false;
 var canvasSize;
-// var c0 = {
-//     angle: undefined,
-//     points: undefined,
-//     coordinates: undefined
-// };
-// var c1 = {
-//     angle: undefined,
-//     points: undefined,
-//     coordinates: undefined
-// };
-// var c2 = {
-//     angle: undefined,
-//     points: undefined,
-//     coordinates: undefined
-// };
-// var c3 = {
-//     angle: undefined,
-//     points: undefined,
-//     coordinates: undefined
-// };
-// var c4 = {
-//     angle: undefined,
-//     points: undefined,
-//     coordinates: undefined
-// };
-var abs_min_points = 3;
-var abs_max_points = 44;
-var calibrated = {
-    silence: {min: 0, max: 100, avg: 20, osc: 20},
-    loudness: {min: 50, max: 300, avg: 100, osc: 200}
-};
+var calibrated = {min: 0, max: 500, avg: 100, osc: 200};
 var calibrating = false;
 var average = {};
-var audioAvgMax;
 var audioMax;
-var audioAvgMin;
-var audioMin;
-var audioAvgOsc;
 var audioOsc;
+var audioAvgMax;
+var halfAvgMax;
+var audioAvgOsc;
+var halfAvgOsc;
+var quarterAvgOsc;
 var audio = {};
-var circleCount = 5;
+var circleCount = 7;
+var drawCount = 0;
+var drawCountMax = 1;
+var lineCount = 0;
+var loopCount;
+var reverse = false;
+var delay = 500;
+
+function setText(text) {
+    document.getElementById("song").innerHTML = text;
+}
+
+var texts = [
+    {t: " ", d: 500, c: clearLogo},
+    {t: "'Klankbord'", d: 2500, c: logoKlankbord},
+    {t: "", d: 500, c: clearLogo},
+    {t: "Audio visualisation by Marius Linders and Atelier Marjolein Linders", d: 2500, c: logoMarjo},
+    {t: "", d: 500, c: clearLogo},
+    {t: "", d: 2500, c: logoPlay},
+    {t: "", d: 0, c: clearLogo}
+];
+
+function intro(cb, i) {
+    if (i === undefined) i = 0;
+    if (texts[i] === undefined) {
+        cb();
+        return;
+    } else {
+        if (texts[i].t !== undefined) setText(texts[i].t);
+        if (texts[i].c !== undefined) texts[i].c();
+    }
+
+    setTimeout(function () {
+        intro(cb, i + 1);
+    }, texts[i].d);
+}
 
 window.setupVisual = function () {
     canvasSize = (window.innerHeight > window.innerWidth ? window.innerWidth : window.innerHeight);
     createCanvas(window.innerWidth, window.innerHeight);
 
     for (var i = 0; i < circleCount; i++) {
-        window["c" + i] = {points: undefined, angle: undefined, radius: undefined, coordinates: undefined}
+        window["c" + i] = {points: undefined, angle: undefined, radius: undefined, coordinates: undefined, direction: 1};
         window["c" + i].coordinates = new Coordinates({
             canvas: canvas,
             radius: window["c" + i].radius,
             angle: window["c" + i].angle
         });
     }
+    c6.direction = -1;
+    // strokeCap(PROJECT);
+    strokeJoin(MITER);
+    noSmooth()
 };
 
+var drawEnabled = false;
 window.drawVisual = function (audioData) {
+    if (audioData.song !== undefined) {
+        drawEnabled = false;
+        texts[5].t = audioData.song;
+        intro(function () {
+            drawEnabled = true;
+        });
+        return;
+    }
     audio = audioData;
     if (calibrating !== false) {
         calibrating.listen(audioData);
     } else {
         analyzeAudioData(audioData);
     }
-    if (pause() === false) drawLines();
+    if (drawEnabled) drawVisuals();
 };
 
-var drawCount = 0;
-var drawCountMax = 1;
-
-function pause() {
-    // drawCount++;
-    // if (drawCount > drawCountMax) {
-    //     drawCount = 0;
-    //     drawCountMax = map(audio.avgMax || 0, calibrated.loudness.max, calibrated.silence.max, 1, 10);
-    //     if (drawCountMax > 10) drawCountMax = 10;
-    //     else if (drawCountMax < 0) drawCountMax = 0;
+function pause(multiplier) {
+    if (multiplier === undefined) {
+        multiplier = 1;
+    }
+    if (drawCount >= drawCountMax * multiplier) {
+        drawCount = 0;
+        drawCountMax = map(audio.avgMax, 250, 20, -10, 500);
+        console.log(drawCountMax);
+        if (drawCountMax > 10) drawCountMax = 10;
+        else if (drawCountMax < 1) drawCountMax = 1;
         return false;
-    // }
-    // return true;
+    } else {
+        drawCount++;
+        return true;
+    }
 }
 
-function drawLines() {
-    if (lineCount === 0) {
-        calculateCoordinates();
-        lineCountMax = getMaxLineCount();
-        lineCount = 1;
+function logoKlankbord() {
+    background(0, 0, 0);
+    c0.points = 12;
+    c0.coordinates.radius = canvasSize / 7.5;
+    c0.angle = Math.PI * 2 / c0.points;
+    c0.coordinates.setOptions({radius: c0.radius, angle: c0.angle});
+    var lines = calculateLineArray(11);
+    stroke("white");
+    strokeWeight(1);
+    line(lines[0][0].x, lines[0][0].y, lines[2][0].x, lines[2][0].y);
+    line(lines[2][0].x, lines[2][0].y, lines[4][0].x, lines[4][0].y);
+    line(lines[4][0].x, lines[4][0].y, lines[6][0].x, lines[6][0].y);
+    line(lines[6][0].x, lines[6][0].y, lines[8][0].x, lines[8][0].y);
+    line(lines[8][0].x, lines[8][0].y, lines[10][0].x, lines[10][0].y);
+    line(lines[10][0].x, lines[10][0].y, lines[0][0].x, lines[0][0].y);
+}
+
+function logoMarjo() {
+    background(0, 0, 0);
+    c0.points = 12;
+    c1.points = 12;
+    c2.points = 1;
+    c0.coordinates.radius = canvasSize / 7.5;
+    c1.coordinates.radius = canvasSize / 15;
+    c2.coordinates.radius = 0;
+    c0.angle = Math.PI * 2 / c0.points;
+    c1.angle = Math.PI * 2 / c1.points;
+    c2.angle = Math.PI * 2 / c2.points;
+    c0.coordinates.setOptions({radius: c0.radius, angle: c0.angle});
+    c1.coordinates.setOptions({radius: c1.radius, angle: c1.angle});
+    c2.coordinates.setOptions({radius: c2.radius, angle: c2.angle});
+    var lines = calculateLineArray(11);
+    stroke("white");
+    strokeWeight(1);
+    line(lines[0][0].x, lines[0][0].y, lines[4][0].x, lines[4][0].y);
+    line(lines[4][0].x, lines[4][0].y, lines[0][2].x, lines[0][2].y);
+    line(lines[4][0].x, lines[4][0].y, lines[8][0].x, lines[8][0].y);
+    line(lines[6][0].x, lines[6][0].y, lines[10][0].x, lines[10][0].y);
+    line(lines[6][0].x, lines[6][0].y, lines[0][1].x, lines[0][1].y);
+    line(lines[10][0].x, lines[10][0].y, lines[0][1].x, lines[0][1].y);
+    line(lines[0][0].x, lines[0][0].y, lines[2][0].x, lines[2][0].y);
+    line(lines[2][0].x, lines[2][0].y, lines[4][0].x, lines[4][0].y);
+    line(lines[4][0].x, lines[4][0].y, lines[6][0].x, lines[6][0].y);
+    line(lines[6][0].x, lines[6][0].y, lines[8][0].x, lines[8][0].y);
+    line(lines[8][0].x, lines[8][0].y, lines[10][0].x, lines[10][0].y);
+    line(lines[10][0].x, lines[10][0].y, lines[0][0].x, lines[0][0].y);
+}
+
+function logoPlay() {
+    background(0, 0, 0);
+    c0.points = 12;
+    c1.points = 12;
+    c0.coordinates.radius = canvasSize / 7.5;
+    c1.coordinates.radius = canvasSize / 10;
+    c0.angle = Math.PI * 2 / c0.points;
+    c1.angle = Math.PI * 2 / c1.points;
+    c0.coordinates.setOptions({radius: c0.radius, angle: c0.angle});
+    c1.coordinates.setOptions({radius: c1.radius, angle: c1.angle});
+    var lines = calculateLineArray(18);
+    stroke("white");
+    strokeWeight(1);
+    line(lines[0][0].x, lines[0][0].y, lines[2][0].x, lines[2][0].y);
+    line(lines[2][0].x, lines[2][0].y, lines[4][0].x, lines[4][0].y);
+    line(lines[4][0].x, lines[4][0].y, lines[6][0].x, lines[6][0].y);
+    line(lines[6][0].x, lines[6][0].y, lines[8][0].x, lines[8][0].y);
+    line(lines[8][0].x, lines[8][0].y, lines[10][0].x, lines[10][0].y);
+    line(lines[10][0].x, lines[10][0].y, lines[0][0].x, lines[0][0].y);
+    line(lines[0][0].x, lines[0][0].y, lines[2][0].x, lines[2][0].y);
+    line(lines[2][0].x, lines[2][0].y, lines[4][0].x, lines[4][0].y);
+    line(lines[4][0].x, lines[4][0].y, lines[6][0].x, lines[6][0].y);
+    line(lines[6][0].x, lines[6][0].y, lines[8][0].x, lines[8][0].y);
+    line(lines[8][0].x, lines[8][0].y, lines[10][0].x, lines[10][0].y);
+    line(lines[10][0].x, lines[10][0].y, lines[0][0].x, lines[0][0].y);
+    line(lines[0][1].x, lines[0][1].y, lines[4][1].x, lines[4][1].y);
+    line(lines[4][1].x, lines[4][1].y, lines[8][1].x, lines[8][1].y);
+    line(lines[8][1].x, lines[8][1].y, lines[0][1].x, lines[0][1].y);
+}
+
+function clearLogo() {
+    background(0, 0, 0);
+}
+
+function drawVisuals() {
+    var weightA = [2];
+    var weightB = [audioAvgOsc / 4];
+    var weightC = [8];
+    var weightD = [audioOsc];
+
+    var colorA = [200, 120, 30]; //paars naar geel
+    var colorB = [255, map(audioOsc || 0, 200, 0, 255, 175), map(audioOsc || 0, 200, 0, 255, 0)];
+
+    var colorC = [0, 150, 150]; //lichtblauw
+    var colorD = [0, 0, 0, 40];
+    var colorE = [0, 0, 0];
+    var colorF = [0, 80, 120]; //donkerblauw
+
+
+    if (audioOsc > 100) {
+        colorD = [map(audioMax || 0, 200, 0, 120, 0), 0, map(audioMax || 0, 200, 0, 60, 0), 40];
+    } else {
+        colorD = [0, 0, 0, 40];
     }
 
-    var lines = generateLineArray(lineCount);
+    if (lineCount === 0) {
+        calculatePoints();
+        var lcm1 = lcm(c0.points, c1.points);
+        var lcm2 = lcm(c2.points, c3.points);
 
-    //background(0, 0, 0, Math.abs(map(audio.osc, calibrated.loudness.osc, calibrated.silence.osc, 25, 50)));
-    background(0, 0, 0, 50);
+        if (lcm1 > lcm2) {
+            loopCount = lcm1;
+        } else {
+            loopCount = lcm2;
+        }
+    }
+    var lines = calculateLineArray(lineCount);
 
-    // stroke("grey"); strokeWeight(0.25)
-    // for (var i = 0; i < c1.points; i++) {
-    //     var p1 = i;
-    //     var p2 = i + 5;
-    //     p2 = lines[p2] === undefined ? 0 : p2;
-    //     if (lines.length > c1.points) {
-    //         line(lines[p1][1].x, lines[p1][1].y, lines[p2][1].x, lines[p2][1].y);
-    //     }
-    // }
-    stroke("grey");
-    strokeWeight(1 + (audioOsc * 5));
-    for (var i = 0; i < lines.length; i++) {
-        var p1 = i;
+    background.apply(null, colorD);
+
+    // shapeC
+    stroke.apply(null, colorF);
+    strokeWeight.apply(null, weightD);
+    for (var j = 0; j < lines.length; j++) {
+        var p1 = j;
         var p2 = p1 - 1;
         p2 = lines[p2] === undefined ? 0 : p2;
+        if (j > 0) {
+            line(lines[p1][6].x, lines[p1][6].y, lines[p2][6].x, lines[p2][6].y);
+        }
+    }
+
+    // shapeC
+    stroke.apply(null, colorC);
+    strokeWeight.apply(null, weightA);
+    for (var k = 0; k < lines.length; k++) {
+        var p1 = k;
+        var p2 = p1 - 1;
+        p2 = lines[p2] === undefined ? 0 : p2;
+        if (k > 0) {
+            line(lines[p1][4].x, lines[p1][4].y, lines[p2][4].x, lines[p2][4].y);
+            line(lines[p1][5].x, lines[p1][5].y, lines[p2][5].x, lines[p2][5].y);
+            line(lines[p2][4].x, lines[p2][4].y, lines[p1][5].x, lines[p1][5].y);
+        }
+    }
+
+    // shapeA
+    stroke.apply(null, colorA);
+    strokeWeight.apply(null, weightA);
+    for (var i = 0; i < lines.length; i += 2) {
+        var p1 = i;
+        var p2 = p1 - 1;
+        var p3 = p1 - 2;
+        p2 = lines[p2] === undefined ? 0 : p2;
+        p3 = lines[p3] === undefined ? 0 : p3;
         if (i > 0) {
             line(lines[p1][1].x, lines[p1][1].y, lines[p2][1].x, lines[p2][1].y);
             line(lines[p1][0].x, lines[p1][0].y, lines[p2][0].x, lines[p2][0].y);
             line(lines[p1][0].x, lines[p1][0].y, lines[p1][1].x, lines[p1][1].y);
+
+            line(lines[p2][1].x, lines[p2][1].y, lines[p3][1].x, lines[p3][1].y);
+            line(lines[p2][0].x, lines[p2][0].y, lines[p3][0].x, lines[p3][0].y);
+            line(lines[p2][0].x, lines[p2][0].y, lines[p2][1].x, lines[p2][1].y);
         }
     }
-    stroke("white");
-    strokeWeight(1 + (audioOsc * 5));
-    for (var i = 0; i < lines.length; i++) {
-        var p1 = i;
+
+    // shapeB
+    stroke.apply(null, colorB);
+    strokeWeight.apply(null, weightB);
+    for (var j = 0; j < lines.length; j++) {
+        var p1 = j;
         var p2 = p1 - 1;
         p2 = lines[p2] === undefined ? 0 : p2;
-        if (i > 0) {
+        if (j > 0) {
             line(lines[p1][2].x, lines[p1][2].y, lines[p2][2].x, lines[p2][2].y);
             line(lines[p1][3].x, lines[p1][3].y, lines[p2][3].x, lines[p2][3].y);
             line(lines[p1][2].x, lines[p1][2].y, lines[p1][3].x, lines[p1][3].y);
         }
     }
-    stroke("red");
-    strokeWeight(1);
-    for (var i = 0; i < lines.length; i++) {
-        var p1 = i;
-        var p2 = p1 - 1;
-        p2 = lines[p2] === undefined ? 0 : p2;
-        if (i > 0) {
-            console.log(lines[p1])
-            line(lines[p1][1].x, lines[p1][1].y, lines[p1][3].x, lines[p1][3].y);
-        }
-    }
 
-    if (reverse === true) lineCount--;
-    else lineCount++;
+    if (reverse === true) {
+        if (pause(0.01) === false) lineCount--;
+    } else {
+        if (pause() === false) lineCount += 1;
+    }
 
     if (lineCount < 1) {
         lineCount = 0;
         reverse = false;
     }
-    else if (lineCount > lineCountMax) {
+    else if (lineCount > loopCount) {
         reverse = true;
     }
 }
 
-function getMaxLineCount() {
-    return lcm(c0.points, c1.points) + lcm(c2.points, c3.points) + c0.points + c1.points + c2.points + c3.points + c4.points;
-}
+function calculatePoints() {
+    // c0.points = Math.round(map(audioMax, 250, 0, 12,3));
+    // if(c0.points > 12) {c0.points  = 12};
+    // c1.points = c0.points * (c0.points + 1 );
+    // c2.points = getRandom(3,12);
+    // c3.points = c0.points ;
+    // c4.points = c2.points;
+    // c5.points = c2.points;
+    // c6.points = c2.points;
 
+    c0.points = Math.round(getRandom(3, 24) * audioAvgOsc / 50);// c2.points * z;
+    c1.points = Math.round(getRandom(3, 15));// c3.points * z;
+    c2.points = Math.round(getRandom(3, 12));// x*(y+1);
+    c3.points = c2.points * (c2.points + 1);
+    c4.points = c1.points;
+    c5.points = c1.points;
+    c6.points = c1.points;
 
-function calculateCoordinates() {
-    c0.points = 60;//getRandomBetweenMinAndMax();
-    c1.points = 12;//getRandomBetweenMinAndMax();
-    c2.points = 20; //getRandomBetweenMinAndMax();
-    c3.points = 4; //getRandomBetweenMinAndMax();
-    c4.points = 8; //getRandomBetweenMinAndMax();
-
-    // if (c0.points < abs_min_points) c0.points = abs_min_points;
-    // if (c0.points > abs_max_points) c0.points = abs_max_points;
-    // if (c1.points < abs_min_points) c1.points = abs_min_points;
-    // if (c1.points > abs_max_points) c1.points = abs_max_points;
-    // if (c2.points < abs_min_points) c2.points = abs_min_points;
-    // if (c2.points > abs_max_points) c2.points = abs_max_points;
 
     var obj = {};
     for (var i = 0; i < circleCount; i++) {
@@ -266,72 +438,68 @@ function calculateCoordinates() {
     return obj;
 }
 
-function generateLineArray(lineCount) {
+function calculateLineArray(lineCount) {
     for (var i = 0; i < circleCount; i++) {
-        window["c"+i].coordinates.init();
+        window["c" + i].coordinates.init();
     }
-
     var lines = [];
-
     for (var i = 0; i < lineCount; i++) {
         var circles = [];
         for (var j = 0; j < circleCount; j++) {
-            window["c" + j].coordinates.move();
+            window["c" + j].coordinates.move(window["c" + j].direction);
             circles.push({x: window["c" + j].coordinates.pos.x, y: window["c" + j].coordinates.pos.y});
         }
-
         lines.push(circles);
     }
-
     return lines;
 }
 
-function getRandomBetweenMinAndMax() {
-    var max_points = Math.round(audioAvgOsc * (abs_max_points - abs_min_points) + abs_min_points);
-    var min_points = Math.round((audioAvgOsc - audioAvgOsc / 3) * (abs_max_points / 3 - abs_min_points) + abs_min_points);
-    return Math.floor((Math.random() * (max_points - min_points + 1) + abs_min_points));
-}
-
 function analyzeAudioData(data) {
-    audio.avgMax = getAvg(average, "max", data.max, 50);
-    audio.avgMin = getAvg(average, "min", data.min, 50);
-    audio.avgOsc = getAvg(average, "osc", data.osc, 50);
-    audio.avgOsc5 = getAvg(average, "osc", data.osc, 5);
+    audioMax = audio.avgMax = getAvg(average, "max", data.max, 3);
+    audioOsc = audio.avgOsc = getAvg(average, "osc", data.osc, 3);
+    audioAvgMax = audio.avgMax = getAvg(average, "max", data.max, 200);
+    halfAvgMax = audioAvgMax / 2;
+    quarterAvgMax = audioAvgMax / 4;
+    audioAvgOsc = audio.avgOsc = getAvg(average, "osc", data.osc, 100);
+    halfAvgOsc = audioAvgOsc / 4;
+    quarterAvgOsc = audioAvgOsc / 4;
 
-    audioAvgMax = Math.round(map(audio.avgMax, calibrated.loudness.max, calibrated.silence.max, 300, 1));
-    audioMax = map(data.max, calibrated.loudness.max, calibrated.silence.max, 300, 1);
-    audioAvgMin = Math.round(map(audio.avgMin, calibrated.loudness.min, calibrated.loudness.min, 300, 1));
-    audioMin = map(data.min, calibrated.loudness.min, calibrated.silence.min, 300, 1);
-    audioAvgOsc = map(audio.avgOsc, calibrated.loudness.osc, calibrated.silence.osc, 0.5, 0.001);
-    audioOsc = map(audio.avgOsc5, calibrated.loudness.osc, calibrated.silence.osc, 0.25, 0);
+    var sizeC = canvasSize * 0.35 + audioAvgOsc / 4;
 
-    c0.coordinates.radius = canvasSize * (0.45 + audioOsc);
-    c1.coordinates.radius = canvasSize * (0.45);// - audioOsc);
-    c2.coordinates.radius = canvasSize * 0.5;
-    c3.coordinates.radius = canvasSize * 0.4;
-    c4.coordinates.radius = canvasSize * 0.2;
+    // cirlce A
+    c0.coordinates.radius = canvasSize * 0.25;
+    c1.coordinates.radius = sizeC + quarterAvgMax;
+
+    // cirlce B
+    c2.coordinates.radius = sizeC;
+    c3.coordinates.radius = canvasSize * 0.25 - audioAvgMax / 10;
+
+    // cirlce C
+    c4.coordinates.radius = sizeC - (audioOsc / 2 * audioOsc / 2);
+    c5.coordinates.radius = sizeC + (audioAvgOsc / 4) * (audioAvgOsc / 4);
+    c6.coordinates.radius = sizeC + 2 * audioAvgOsc;
 }
 
 var Coordinates = function (options) {
-    this.calculate_coordinates = function (pos) {
+
+    this.calculate_coordinates = function (direction, pos) {
         pos = pos || {
-            x: this.canvas.width / 2,
-            y: this.canvas.height / 2
-        };
-        pos.x -= Math.sin(this.i += this.angle) * this.radius;
-        pos.y += Math.sin(this.j += this.angle) * this.radius;
+                x: this.canvas.width / 2,
+                y: this.canvas.height / 2
+            };
+        pos.x -= Math.sin(direction > 0 ? (this.i += this.angle) : (this.i -= this.angle)) * this.radius;
+        pos.y += Math.sin(direction > 0 ? (this.j += this.angle) : (this.j -= this.angle)) * this.radius;
         return pos;
     };
 
-    this.move = function () {
-        this.pos = this.calculate_coordinates();
+    this.move = function (direction) {
+        this.pos = this.calculate_coordinates(direction);
         return this;
     };
 
     this.init = function () {
         this.i = 0;
         this.j = Math.PI / 2;
-        // this.pos = this.calculate_coordinates();
     };
 
     this.setOptions = function (options) {
@@ -358,89 +526,12 @@ var Coordinates = function (options) {
     return this;
 };
 
-var Calibration = function (options) {
-    this.$alert = document.getElementById("alert");
-    this.seconds = 5;
-    this.silence = {};
-    this.loudness = {};
-    this.calibrationData = {};
-
-    this.resetCalData = function () {
-        this.calibrationData = {};
-        for (var i = 0; i < options.length; i++) {
-            this.calibrationData[options[i]] = [];
-        }
-    };
-
-    this.calibrateMin = function (callback) {
-        for (var i = 0; i < options.length; i++) {
-            this.silence[options[i]] = avg(this.calibrationData[options[i]]);
-        }
-        callback();
-    };
-
-    this.calibrateMax = function (callback) {
-        for (var i = 0; i < options.length; i++) {
-            this.loudness[options[i]] = max(this.calibrationData[options[i]]);
-            if (this.silence[options[i]] > this.loudness[options[i]]) {
-                this.loudness[options[i]] = this.silence[options[i]] + 20;
-            }
-        }
-        callback();
-    };
-
-    this.showInfo = function (message) {
-        this.$alert.innerHTML = "<h2>Kalibratie</h2><p>" + message + "</p>";
-    };
-
-    this.calibrateSilence = function (finalCallback) {
-        this.resetCalData();
-        var silenceInterval = window.setInterval(function (self) {
-            if (self.seconds > 0) {
-                self.seconds--;
-                self.showInfo("Wees stil... " + self.seconds);
-            } else {
-                window.clearInterval(silenceInterval);
-                self.seconds = 5;
-                self.calibrateMin(function () {
-                    self.calibrateLoudness(finalCallback);
-                });
-            }
-        }, 500, this);
-        this.showInfo("Wees stil... " + this.seconds);
-    };
-
-    this.calibrateLoudness = function (finalCallback) {
-        this.resetCalData();
-        var loudInterval = window.setInterval(function (self) {
-            if (self.seconds > 0) {
-                self.seconds--;
-                self.showInfo("Maak lawaai... " + self.seconds);
-            } else {
-                window.clearInterval(loudInterval);
-                self.calibrateMax(function () {
-                    self.$alert.innerHTML = "";
-                    finalCallback({silence: self.silence, loudness: self.loudness});
-                });
-            }
-        }, 500, this);
-        this.showInfo("Wees stil... " + this.seconds);
-    };
-
-    this.start = function (finalCallback) {
-        this.resetCalData();
-        this.calibrateSilence(finalCallback);
-    };
-
-    this.listen = function (data) {
-        for (var i = 0; i < options.length; i++) {
-            this.calibrationData[options[i]].push(data[options[i]]);
-        }
-    }
-};
-
 function map(source, actualMin, actualMax, targetMin, targetMax) {
     return actualMin > actualMax ? actualMin > source ? (source - actualMin) * (targetMax - targetMin) / (actualMax - actualMin) + targetMin : targetMin : actualMax > actualMin ? actualMax > source ? (source - actualMin) * (targetMax - targetMin) / (actualMax - actualMin) + targetMin : targetMax : void 0
+}
+
+function max(arr) {
+    return Math.max.apply(null, arr);
 }
 
 function avg(arr) {
@@ -449,10 +540,6 @@ function avg(arr) {
         tmp += arr[i];
     }
     return Math.round(tmp / arr.length);
-}
-
-function max(arr) {
-    return Math.max.apply(null, arr);
 }
 
 function getAvg(average, type, value, limit) {
@@ -466,7 +553,11 @@ function getAvg(average, type, value, limit) {
     return avg(average[type]);
 }
 
-function greatestCommonDivider(op, ip) {
+function getRandom(min, max) {
+    return Math.floor(Math.random() * (max - min)) + min;
+}
+
+function gcd(op, ip) {
     while (ip) {
         var t = ip;
         ip = op % ip;
@@ -481,22 +572,10 @@ function lcm(op, ip) {
     if (!op || !ip) {
         return 0;
     }
-    return (Math.abs((op * ip) / greatestCommonDivider(op, ip)));
+    return (Math.abs((op * ip) / gcd(op, ip)));
 }
 
 function windowResized() {
     canvasSize = (window.innerHeight > window.innerWidth ? window.innerWidth : window.innerHeight);
     createCanvas(window.innerWidth, window.innerHeight);
-}
-
-function keyReleased(value) {
-    if (value.key === "k") {
-        console.log("calibrating");
-        calibrating = new Calibration(["min", "max", "osc"]);
-        calibrating.start(function (response) {
-            console.log(response);
-            calibrated = response;
-            calibrating = false;
-        });
-    }
 }
