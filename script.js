@@ -67,7 +67,7 @@ function loadSong(onstart, onend) {
         fft.setInput(song);
         onstart();
 
-        song.rate(20);
+//        song.rate(20);
     });
 }
 
@@ -111,6 +111,7 @@ window.drawAudio = function () {
 
     return analyzer.analyze(mappedValues);
 };
+
 
 
 var canvasSize;
@@ -206,7 +207,6 @@ function pause(multiplier) {
     if (drawCount >= drawCountMax * multiplier) {
         drawCount = 0;
         drawCountMax = map(audio.avgMax, 250, 20, -10, 500);
-        console.log(drawCountMax);
         if (drawCountMax > 10) drawCountMax = 10;
         else if (drawCountMax < 1) drawCountMax = 1;
         return false;
@@ -299,6 +299,9 @@ function clearLogo() {
 }
 
 function drawVisuals() {
+
+    console.log(audioAvgOsc);
+
     var weightA = [2];
     var weightB = [audioAvgOsc / 4];
     var weightC = [8];
@@ -419,7 +422,8 @@ function calculatePoints() {
     // c5.points = c2.points;
     // c6.points = c2.points;
 
-    c0.points = Math.round(getRandom(3, 24) * audioAvgOsc / 50);// c2.points * z;
+    c0.points = Math.round(audioAvgOsc);
+    if (c0.points < 3){c0.points ++}; //c2.points * z;
     c1.points = Math.round(getRandom(3, 15));// c3.points * z;
     c2.points = Math.round(getRandom(3, 12));// x*(y+1);
     c3.points = c2.points * (c2.points + 1);
